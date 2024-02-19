@@ -31,9 +31,7 @@ from jax import vmap
 
 from fors2tostellarpopsynthesis.filters import FilterInfo
 from fors2tostellarpopsynthesis.fitters.fitter_jaxopt import (
-    mean_mags_ageDepMet_Q, mean_sfr, mean_sfr_ageDepMet, mean_sfr_ageDepMet_Q,
-    mean_spectrum_ageDepMet_Q, mean_ugri_ageDepMet_Q, ssp_spectrum_fromparam,
-    ssp_spectrum_fromparam_ageDepMet, ssp_spectrum_fromparam_ageDepMet_Q)
+    mean_mags, mean_sfr, mean_spectrum, mean_ugri, ssp_spectrum_fromparam)
 
 jax.config.update("jax_enable_x64", True)
 
@@ -54,7 +52,6 @@ for index in index_selected_filters:
     list_name_f_sel.append(ps.filters_namelist[index])
 list_wlmean_f_sel = jnp.array(list_wlmean_f_sel)
 
-
 def func_strip_name(x):
     """
     stripp string of filters name for shorter name plotting
@@ -63,7 +60,7 @@ def func_strip_name(x):
     """
     return x.split('_')[-1]
 
-def calc_ratio(wl,spec, w_blue = [3750.,3950.], w_red = [4050.,4250] ):
+def calc_ratio(wl, spec, w_blue = [3750.,3950.], w_red = [4050.,4250] ):
     """Calculate the ratio of spectra in the wavelength range.
 
 
@@ -81,83 +78,10 @@ def calc_ratio(wl,spec, w_blue = [3750.,3950.], w_red = [4050.,4250] ):
 
     indexes_red = np.where(np.logical_and(wl>=w_red[0], wl<=w_red[1]))[0]
     indexes_blue = np.where(np.logical_and(wl>=w_blue[0], wl<=w_blue[1]))[0]
-    int_spec_blue = np.trapz(spec[indexes_blue],wl[indexes_blue])
-    int_spec_red = np.trapz(spec[indexes_red],wl[indexes_red])
+    int_spec_blue = np.trapz(spec[indexes_blue], wl[indexes_blue])
+    int_spec_red = np.trapz(spec[indexes_red], wl[indexes_red])
     specratio = int_spec_red/int_spec_blue
     return specratio
-
-
-def rescale_photometry(params,wls,mags,errmags,z_obs):
-    """
-    Rescale photometric data points from observation frame onto SED fnu scale in restframe
-    for plotting on the same axis the phtometry and the SED
-    :param params: fitted parameters
-    :type params: dictionnary of parameters
-    :param wls: central wavelength of photometric observation filters
-    :type wls: jax array of floats
-    :param mags: selected magnitudes used for the fit (usually AB magnitudes)
-    :type mags: jax array of floats
-    :param errmags: errors on magnitudes (usually AB magnitudes)
-    :type errmags: jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :return: wavelengths, rescaled fluxes and errors and scaling factor of phtometric data
-    :rtype: 3 jax arrays of floats and a float
-    """
-    # transform magnitudes into fluxes
-    fluxes = vmap(lambda x : jnp.power(10.,-0.4*x), in_axes=0)(mags)
-    efluxes = vmap(lambda x,y : jnp.power(10.,-0.4*x)*y)(mags, errmags)
-
-    # transform from observation frame to restframe
-    wls_rest = wls/(1.+z_obs)
-    fluxes *= (1.+z_obs)
-    efluxes *= (1.+z_obs)
-
-    # calculate the SED model from the parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam(params,z_obs)
-
-    # calculate the scaling factor for photometric points
-    flux_pred = interp1d(wls_rest,x,y_dust)
-    scaling_factor =  jnp.mean(flux_pred/fluxes)
-
-    return wls_rest,  fluxes*scaling_factor,  efluxes*scaling_factor, scaling_factor
-
-
-def rescale_spectroscopy(params,wls,fluxes,efluxes,z_obs):
-    """
-    Calculate the rescaling factor of fors2 spectroscopy on restframe SSP spectrum plot.
-    Comparison is done in restframe.
-
-    :param params:fitted parameters
-    :type params:dictionnary of parameters
-    :param wls: wavelength of spectroscopic Fors2  observations
-    :type wls: jax array of floats
-    :param fluxes: relative fluxes of Fors2
-    :type fluxes: jax array of floats
-    :param efluxes: errors on Fors2 fluxes
-    :type efluxes:jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :return: wavelengths, rescaled fluxes and errors and scaling factor of spectroscopic data
-    :rtype: 3 jax arrays of floats and a float
-
-    """
-    # convert the spectrum in rest frame
-    wls_rest = wls/(1.+z_obs)
-    fluxes *= (1.+z_obs)
-    efluxes *= (1.+z_obs)
-
-    # compute the model from params (params from photometry)
-    x,y_nodust,y_dust = ssp_spectrum_fromparam(params,z_obs)
-
-    # calculate the scaling factor
-    flux_pred = interp1d(wls_rest,x,y_dust)
-    scaling_factor =  jnp.mean(flux_pred/fluxes)
-
-    # return rescaled fluxes in rest-frame
-    return wls_rest,  fluxes*scaling_factor,  efluxes*scaling_factor, scaling_factor
-
-
 
 def rescale_starlight_inrangefors2(wls,fluxes,Xspec_data_rest,Yspec_data_rest):
     """
@@ -191,344 +115,6 @@ def rescale_starlight_inrangefors2(wls,fluxes,Xspec_data_rest,Yspec_data_rest):
 
     # return rescaled starlight spectrum
     return wls,  fluxes*scaling_factor, scaling_factor
-
-
-def plot_fit_ssp_photometry(params,wls,mags,errmags,z_obs,subtit,ax=None):
-    """
-    Plot SSP model fitted and photometric data points. Photometric data point are rescaled
-    from observation frame to rest-frame.
-
-    :param params:fitted parameters
-    :type params:dictionnary of parameters
-    :param wls:central wavelength of photometric observation filters
-    :type wls: jax array of floats
-    :param mags: selected magnitudes used for the fit (usually AB magnitudes)
-    :type mags: jax array of floats
-    :param errmags: errors on magnitudes (usually AB magnitudes)
-    :type errmags:jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-    """
-    # Compute the SED from the fitted model
-    x,y_nodust,y_dust = ssp_spectrum_fromparam(params,z_obs)
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot model with/without dust
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model no dust")
-
-    # rescale photometric data-points from observation frame to rest frame
-    xphot,yphot,eyphot,factor = rescale_photometry(params,wls,mags,errmags,z_obs)
-
-    # plot photometric data-points
-    label = "Photometry for " + subtit
-    ax.errorbar(xphot , yphot, yerr=eyphot, marker='o', color="black", ecolor="black", markersize=12, lw=2, label=label)
-
-    title = "SED $L_\\nu$ with and without dust and rescaled photometry (rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ (AB units - maggies")
-
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-
-    filter_tags = [func_strip_name(n) for n in list_name_f_sel]
-    for idx,tag in enumerate(filter_tags):
-        ax.text(xphot[idx],2.*ymax,tag,fontsize=12,fontweight="bold",horizontalalignment='center',verticalalignment='center')
-        ax.axvline(xphot[idx],linestyle=':')
-
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min ,ylim_max )
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_fit_ssp_spectroscopy(params,Xspec_data_rest,Yspec_data_rest,EYspec_data_rest,z_obs,subtit,ax=None):
-    """
-    Plot SSP model fitted and Fors2 spectroscopic data points. Spectroscopic data points are rescaled
-    from observation frame to rest-frame.
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :param Xspec_data_rest: wavelength of spectroscopic observation in restframe
-    :type Xspec_data_rest: jax array of floats
-    :param Yspec_data_rest: rescaled fluxes of spectroscopic data
-    :type Yspec_data_rest: jax array of floats
-    :param EYspec_data_rest: errors on rescaled fluxes of spectroscopic data
-    :type EYspec_data_rest:jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-
-    """
-
-    # calculate the SED
-    x,y_nodust,y_dust = ssp_spectrum_fromparam(params,z_obs)
-
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot the fitted model
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model No dust")
-
-    # plot spectroscopic data (rest-frame)
-    #xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest*params["SCALEF"],EYspec_data_rest*params["SCALEF"]
-    xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest,EYspec_data_rest
-    label = "Fors spectrum " + subtit
-    ax.plot(xspec_r,yspec,'b-',lw=3,label = label )
-
-    title = "SED $L_\\nu$ with and without dust and rescaled spectroscopy(rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ (AB units - maggies)")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min,ylim_max)
-
-    ax.grid()
-    plt.show(block = False)
-
-
-
-def plot_fit_ssp_spectrophotometry(params,Xspec_data_rest,Yspec_data_rest,EYspec_data_rest,
-                                   Xphot_data_rest,Yphot_data_rest,EYphot_data_rest,
-                                   z_obs,subtit,ax=None):
-    """
-    Plot SSP model fitted with combined spectro and photometric data.
-    Both data are rescaled and set to rest-frame.
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :param Xspec_data_rest: wavelength of spectroscopic observation in restframe
-    :type Xspec_data_rest: jax array of floats
-    :param Yspec_data_rest: rescaled fluxes of spectroscopic data
-    :type Yspec_data_rest: jax array of floats
-    :param EYspec_data_rest: errors on rescaled fluxes of spectroscopic data
-    :type EYspec_data_rest:jax array of floats
-    :param Xphot_data_rest: filter central wavelenth in rest frame
-    :type Xphot_data_rest: jax array of floats
-    :param Yphot_data_rest: photometric flux in rest frame
-    :type Yphot_data_rest: jax array of floats
-    :param EYphot_data_rest: error on photometric flux in rest frame
-    :type EYphot_data_rest: jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-
-    """
-    # calculate the SED model from fitted parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam(params,z_obs)
-
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot SED model
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model no dust")
-
-    #xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest*params["SCALEF"],EYspec_data_rest*params["SCALEF"]
-    xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest,EYspec_data_rest
-    # plot Fors2 data
-    label = "Fors spectrum " + subtit
-    ax.plot(xspec_r,yspec,'b-',lw=3,label = label )
-
-    # plot photometric data
-    label = "Photometry for " + subtit
-    # need to rescale photometric data with dusty model
-    #.............................................................................
-     # calculate the scaling factor for photometric points
-    fluxphot_pred = interp1d(Xphot_data_rest,x,y_dust)
-    scaling_factor =  jnp.mean(fluxphot_pred/Yphot_data_rest)
-    xphot , yphot, eyphot =  Xphot_data_rest,Yphot_data_rest*scaling_factor,EYphot_data_rest*scaling_factor
-    #...............................................................................
-
-    #xphot , yphot, eyphot = Xphot_data_rest,Yphot_data_rest,EYphot_data_rest
-    ax.errorbar( xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
-
-    title = "SED $L_\\nu$ with/wo dust spectroscopy and photometry combined (rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-
-    filter_tags = [func_strip_name(n) for n in list_name_f_sel]
-    for idx,tag in enumerate(filter_tags):
-        ax.text(xphot[idx],2.*ymax,tag,fontsize=12,fontweight="bold",horizontalalignment='center',verticalalignment='center')
-        ax.axvline(xphot[idx],linestyle=':')
-
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ (AB units - maggies)")
-
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min,ylim_max)
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_fit_ssp_spectrophotometry_sl(params,Xspec_data_rest,Yspec_data_rest,EYspec_data_rest,
-                                   Xphot_data_rest,Yphot_data_rest,EYphot_data_rest,w_sl , fnu_sl,
-                                   z_obs,subtit,ax=None):
-    """
-    Plot SSP models DSPS + StarLight fitted with combined spectro and photometric data.
-    Both data are rescaled and set to rest-frame.
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :param Xspec_data_rest: wavelength of spectroscopic observation in restframe
-    :type Xspec_data_rest: jax array of floats
-    :param Yspec_data_rest: rescaled fluxes of spectroscopic data
-    :type Yspec_data_rest: jax array of floats
-    :param EYspec_data_rest: errors on rescaled fluxes of spectroscopic data
-    :type EYspec_data_rest:jax array of floats
-    :param Xphot_data_rest: filter central wavelenth in rest frame
-    :type Xphot_data_rest: jax array of floats
-    :param Yphot_data_rest: photometric flux in rest frame
-    :type Yphot_data_rest: jax array of floats
-    :param EYphot_data_rest: error on photometric flux in rest frame
-    :type EYphot_data_rest: jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :param w_sl: wavelength for StarLight model in restframe
-    :type w_sl: jax array of floats
-    :param fnu_sl: flux of Starlight model in restframe
-    :type fnu_sl: jax array of floats
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-
-    """
-    # compute the model from the parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam(params,z_obs)
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot models
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model no dust")
-    ax.plot(w_sl ,fnu_sl,'-',color="grey",lw=2,label="StarLight model")
-
-    # plot Fors2 spectrum in restframe
-    #xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest*params["SCALEF"],EYspec_data_rest*params["SCALEF"]
-    xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest,EYspec_data_rest
-    label = "Fors spectrum " + subtit
-    ax.plot(xspec_r,yspec,'b-',lw=3,label = label )
-
-    # plot Photometric data in restframe
-    label = "Photometry for " + subtit
-    #xphot , yphot, eyphot = Xphot_data_rest,Yphot_data_rest,EYphot_data_rest
-    #.............................................................................
-     # calculate the scaling factor for photometric points
-    fluxphot_pred = interp1d(Xphot_data_rest,x,y_dust)
-    scaling_factor =  jnp.mean(fluxphot_pred/Yphot_data_rest)
-    xphot , yphot, eyphot =  Xphot_data_rest,Yphot_data_rest*scaling_factor,EYphot_data_rest*scaling_factor
-    #...............................................................................
-
-    ax.errorbar( xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
-
-    title = "SED $L_\\nu$ with/wo dust spectroscopy and photometry combined (rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-
-    filter_tags = [func_strip_name(n) for n in list_name_f_sel]
-    for idx,tag in enumerate(filter_tags):
-        ax.text(xphot[idx],2.*ymax,tag,fontsize=12,fontweight="bold",horizontalalignment='center',verticalalignment='center')
-        ax.axvline(xphot[idx],linestyle=':')
-
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min,ylim_max)
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ - (AB unit - maggies)")
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_SFH(params,z_obs,subtit,ax=None):
-    """
-    Plot Star Formation History
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-    """
-
-    tarr,sfh_gal = mean_sfr(params,z_obs)
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-
-    # plot star formation history
-    ax.plot(tarr,sfh_gal,'-k',lw=2)
-
-    t_obs = age_at_z(z_obs, *DEFAULT_COSMOLOGY)
-    ax.axvline(t_obs,color="red")
-
-    sfr_max = sfh_gal.max()*1.1
-    sfr_min = 0.
-    ylim = ax.set_ylim(sfr_min, sfr_max)
-
-    ax.set_title("Fitted Star Formation History (SFH) for " + subtit)
-    xlabel = ax.set_xlabel(r'${\rm cosmic\ time\ [Gyr]}$')
-    ylabel = ax.set_ylabel(r'${\rm SFR\ [M_{\odot}/yr]}$')
-    ax.grid()
-    #ax.legend()
-    plt.show(block = False)
-
 
 def plot_params_kde(samples,hdi_probs=[0.393, 0.865, 0.989],
                     patName=None, fname=None, pcut=None,
@@ -588,11 +174,7 @@ def plot_params_kde(samples,hdi_probs=[0.393, 0.865, 0.989],
         plt.savefig(fname)
         plt.close()
 
-##########################################################################
-# Functions for age-dependant metallicity - Joseph Chevalier, 2024/01/31 #
-##########################################################################
-
-def rescale_photometry_ageDepMet(params, wls, mags, errmags, z_obs):
+def rescale_photometry(params, wls, mags, errmags, z_obs):
     """
     Rescale photometric data points from observation frame onto SED fnu scale in restframe
     for plotting on the same axis the phtometry and the SED
@@ -619,420 +201,15 @@ def rescale_photometry_ageDepMet(params, wls, mags, errmags, z_obs):
     efluxes *= (1.+z_obs)
 
     # calculate the SED model from the parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet(params,z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params,z_obs)
 
     # calculate the scaling factor for photometric points
-    flux_pred = interp1d(wls_rest,x,y_dust)
-    scaling_factor =  jnp.mean(flux_pred/fluxes)
+    flux_pred = interp1d(wls_rest, x, y_dust)
+    scaling_factor = jnp.mean(flux_pred/fluxes)
 
-    return wls_rest,  fluxes*scaling_factor,  efluxes*scaling_factor, scaling_factor
+    return wls_rest, fluxes*scaling_factor, efluxes*scaling_factor, scaling_factor
 
-def rescale_spectroscopy_ageDepMet(params, wls, fluxes, efluxes, z_obs):
-    """
-    Calculate the rescaling factor of fors2 spectroscopy on restframe SSP spectrum plot.
-    Comparison is done in restframe.
-
-    :param params:fitted parameters
-    :type params:dictionnary of parameters
-    :param wls: wavelength of spectroscopic Fors2  observations
-    :type wls: jax array of floats
-    :param fluxes: relative fluxes of Fors2
-    :type fluxes: jax array of floats
-    :param efluxes: errors on Fors2 fluxes
-    :type efluxes:jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :return: wavelengths, rescaled fluxes and errors and scaling factor of spectroscopic data
-    :rtype: 3 jax arrays of floats and a float
-
-    """
-    # convert the spectrum in rest frame
-    wls_rest = wls/(1.+z_obs)
-    fluxes *= (1.+z_obs)
-    efluxes *= (1.+z_obs)
-
-    # compute the model from params (params from photometry)
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet(params,z_obs)
-
-    # calculate the scaling factor
-    flux_pred = interp1d(wls_rest,x,y_dust)
-    scaling_factor =  jnp.mean(flux_pred/fluxes)
-
-    # return rescaled fluxes in rest-frame
-    return wls_rest,  fluxes*scaling_factor,  efluxes*scaling_factor, scaling_factor
-
-def plot_fit_ssp_photometry_ageDepMet(params, wls, mags, errmags, z_obs, subtit, ax=None):
-    """
-    Plot SSP model fitted and photometric data points. Photometric data point are rescaled
-    from observation frame to rest-frame.
-
-    :param params:fitted parameters
-    :type params:dictionnary of parameters
-    :param wls:central wavelength of photometric observation filters
-    :type wls: jax array of floats
-    :param mags: selected magnitudes used for the fit (usually AB magnitudes)
-    :type mags: jax array of floats
-    :param errmags: errors on magnitudes (usually AB magnitudes)
-    :type errmags:jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-    """
-    # Compute the SED from the fitted model
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet(params,z_obs)
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot model with/without dust
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model no dust")
-
-    # rescale photometric data-points from observation frame to rest frame
-    xphot,yphot,eyphot,factor = rescale_photometry_ageDepMet(params,wls,mags,errmags,z_obs)
-
-    # plot photometric data-points
-    label = "Photometry for " + subtit
-    ax.errorbar( xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
-
-    title = "SED $L_\\nu$ with and without dust and rescaled photometry (rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ (AB units - maggies")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-
-    filter_tags = [func_strip_name(n) for n in list_name_f_sel]
-    for idx,tag in enumerate(filter_tags):
-        ax.text(xphot[idx],2.*ymax,tag,fontsize=12,fontweight="bold",horizontalalignment='center',verticalalignment='center')
-        ax.axvline(xphot[idx],linestyle=':')
-
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min ,ylim_max )
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_fit_ssp_spectroscopy_ageDepMet(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest, z_obs, subtit, ax=None):
-    """
-    Plot SSP model fitted and Fors2 spectroscopic data points. Spectroscopic data points are rescaled
-    from observation frame to rest-frame.
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :param Xspec_data_rest: wavelength of spectroscopic observation in restframe
-    :type Xspec_data_rest: jax array of floats
-    :param Yspec_data_rest: rescaled fluxes of spectroscopic data
-    :type Yspec_data_rest: jax array of floats
-    :param EYspec_data_rest: errors on rescaled fluxes of spectroscopic data
-    :type EYspec_data_rest:jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-
-    """
-
-    # calculate the SED
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet(params,z_obs)
-
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot the fitted model
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model No dust")
-
-    # plot spectroscopic data (rest-frame)
-    #xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest*params["SCALEF"],EYspec_data_rest*params["SCALEF"]
-    xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest,EYspec_data_rest
-    label = "Fors spectrum " + subtit
-    ax.plot(xspec_r,yspec,'b-',lw=3,label = label )
-
-    title = "SED $L_\\nu$ with and without dust and rescaled spectroscopy(rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ (AB units - maggies)")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min,ylim_max)
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_fit_ssp_spectrophotometry_ageDepMet(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest,\
-                                             Xphot_data_rest, Yphot_data_rest, EYphot_data_rest,\
-                                             z_obs, subtit, ax=None):
-    """
-    Plot SSP model fitted with combined spectro and photometric data.
-    Both data are rescaled and set to rest-frame.
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :param Xspec_data_rest: wavelength of spectroscopic observation in restframe
-    :type Xspec_data_rest: jax array of floats
-    :param Yspec_data_rest: rescaled fluxes of spectroscopic data
-    :type Yspec_data_rest: jax array of floats
-    :param EYspec_data_rest: errors on rescaled fluxes of spectroscopic data
-    :type EYspec_data_rest:jax array of floats
-    :param Xphot_data_rest: filter central wavelenth in rest frame
-    :type Xphot_data_rest: jax array of floats
-    :param Yphot_data_rest: photometric flux in rest frame
-    :type Yphot_data_rest: jax array of floats
-    :param EYphot_data_rest: error on photometric flux in rest frame
-    :type EYphot_data_rest: jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-
-    """
-    # calculate the SED model from fitted parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet(params,z_obs)
-
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot SED model
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model no dust")
-
-    #xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest*params["SCALEF"],EYspec_data_rest*params["SCALEF"]
-    xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest,EYspec_data_rest
-    # plot Fors2 data
-    label = "Fors spectrum " + subtit
-    ax.plot(xspec_r,yspec,'b-',lw=3,label = label )
-
-    # plot photometric data
-    label = "Photometry for " + subtit
-    # need to rescale photometric data with dusty model
-    #.............................................................................
-     # calculate the scaling factor for photometric points
-    fluxphot_pred = interp1d(Xphot_data_rest,x,y_dust)
-    scaling_factor =  jnp.mean(fluxphot_pred/Yphot_data_rest)
-    xphot , yphot, eyphot =  Xphot_data_rest,Yphot_data_rest*scaling_factor,EYphot_data_rest*scaling_factor
-    #...............................................................................
-
-    #xphot , yphot, eyphot = Xphot_data_rest,Yphot_data_rest,EYphot_data_rest
-    ax.errorbar( xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
-
-    title = "SED $L_\\nu$ with/wo dust spectroscopy and photometry combined (rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-
-    filter_tags = [func_strip_name(n) for n in list_name_f_sel]
-    for idx,tag in enumerate(filter_tags):
-        ax.text(xphot[idx],2.*ymax,tag,fontsize=12,fontweight="bold",horizontalalignment='center',verticalalignment='center')
-        ax.axvline(xphot[idx],linestyle=':')
-
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ (AB units - maggies)")
-
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min,ylim_max)
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_fit_ssp_spectrophotometry_sl_ageDepMet(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest,\
-                                                Xphot_data_rest, Yphot_data_rest, EYphot_data_rest,\
-                                                w_sl, fnu_sl, z_obs, subtit, ax=None):
-    """
-    Plot SSP models DSPS + StarLight fitted with combined spectro and photometric data.
-    Both data are rescaled and set to rest-frame.
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :param Xspec_data_rest: wavelength of spectroscopic observation in restframe
-    :type Xspec_data_rest: jax array of floats
-    :param Yspec_data_rest: rescaled fluxes of spectroscopic data
-    :type Yspec_data_rest: jax array of floats
-    :param EYspec_data_rest: errors on rescaled fluxes of spectroscopic data
-    :type EYspec_data_rest:jax array of floats
-    :param Xphot_data_rest: filter central wavelenth in rest frame
-    :type Xphot_data_rest: jax array of floats
-    :param Yphot_data_rest: photometric flux in rest frame
-    :type Yphot_data_rest: jax array of floats
-    :param EYphot_data_rest: error on photometric flux in rest frame
-    :type EYphot_data_rest: jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :param w_sl: wavelength for StarLight model in restframe
-    :type w_sl: jax array of floats
-    :param fnu_sl: flux of Starlight model in restframe
-    :type fnu_sl: jax array of floats
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-
-    """
-    # compute the model from the parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet(params,z_obs)
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-    __= ax.set_yscale('log')
-    __= ax.set_xscale('log')
-
-    # plot models
-    ax.plot(x,y_dust,'-',color='green',lw=1,label="fitted DSPS model with dust")
-    ax.plot(x,y_nodust,'-',color='red',lw=1,label="fitted DSPS model no dust")
-    ax.plot(w_sl ,fnu_sl,'-',color="grey",lw=2,label="StarLight model")
-
-    # plot Fors2 spectrum in restframe
-    #xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest*params["SCALEF"],EYspec_data_rest*params["SCALEF"]
-    xspec_r,yspec,eyspec = Xspec_data_rest,Yspec_data_rest,EYspec_data_rest
-    label = "Fors spectrum " + subtit
-    ax.plot(xspec_r,yspec,'b-',lw=3,label = label )
-
-    # plot Photometric data in restframe
-    label = "Photometry for " + subtit
-    #xphot , yphot, eyphot = Xphot_data_rest,Yphot_data_rest,EYphot_data_rest
-    #.............................................................................
-     # calculate the scaling factor for photometric points
-    fluxphot_pred = interp1d(Xphot_data_rest,x,y_dust)
-    scaling_factor =  jnp.mean(fluxphot_pred/Yphot_data_rest)
-    xphot , yphot, eyphot =  Xphot_data_rest,Yphot_data_rest*scaling_factor,EYphot_data_rest*scaling_factor
-    #...............................................................................
-
-    ax.errorbar( xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
-
-    title = "SED $L_\\nu$ with/wo dust spectroscopy and photometry combined (rest frame)"
-    ax.set_title(title)
-    ax.legend(loc="lower right")
-
-    ymax = y_nodust.max()
-    ylim_max = ymax*5.
-    ylim_min = ymax/0.5e4
-
-    filter_tags = [func_strip_name(n) for n in list_name_f_sel]
-    for idx,tag in enumerate(filter_tags):
-        ax.text(xphot[idx],2.*ymax,tag,fontsize=12,fontweight="bold",horizontalalignment='center',verticalalignment='center')
-        ax.axvline(xphot[idx],linestyle=':')
-
-    __= ax.set_xlim(1e3,1e6)
-    __= ax.set_ylim(ylim_min,ylim_max)
-    ax.set_xlabel("$\lambda (\\AA)$")
-    ax.set_ylabel("$L_\\nu(\lambda)$ - (AB unit - maggies)")
-
-    ax.grid()
-    plt.show(block = False)
-
-
-def plot_SFH_ageDepMet(params, z_obs, subtit, ax=None):
-    """
-    Plot Star Formation History
-
-    :param params: fitted parameters on rescaled spectroscopic data
-    :type params: dictionnary of parameters
-    :type z_obs: float
-    :param ax: matplotlib axis to plot the figure, default None
-    :type ax: matplotlib axis
-    :param subtit: info on the photometric data on the corresponding spectrum
-    :type subtitle: str
-    :return: plot the figure
-    :rtype: None
-    """
-
-    t_obs, tarr, sfh_gal = mean_sfr_ageDepMet(params,z_obs)
-
-    if ax is None:
-        _, ax = plt.subplots(1, 1)
-
-    # plot star formation history
-    ax.plot(tarr,sfh_gal,'-k',lw=2)
-    ax.axvline(t_obs,color="red")
-
-    sfr_max = sfh_gal.max()*1.1
-    sfr_min = 0.
-    ylim = ax.set_ylim(sfr_min, sfr_max)
-
-    ax.set_title("Fitted Star Formation History (SFH) for " + subtit)
-    xlabel = ax.set_xlabel(r'${\rm cosmic\ time\ [Gyr]}$')
-    ylabel = ax.set_ylabel(r'${\rm SFR\ [M_{\odot}/yr]}$')
-    ax.grid()
-    #ax.legend()
-    plt.show(block = False)
-    
-##################################################################################################################
-# Functions for age-dependant metallicity with a reduced set of parameters to fit - Joseph Chevalier, 2024/01/31 #
-##################################################################################################################
-
-def rescale_photometry_ageDepMet_Q(params, wls, mags, errmags, z_obs):
-    """
-    Rescale photometric data points from observation frame onto SED fnu scale in restframe
-    for plotting on the same axis the phtometry and the SED
-    :param params: fitted parameters
-    :type params: dictionnary of parameters
-    :param wls: central wavelength of photometric observation filters
-    :type wls: jax array of floats
-    :param mags: selected magnitudes used for the fit (usually AB magnitudes)
-    :type mags: jax array of floats
-    :param errmags: errors on magnitudes (usually AB magnitudes)
-    :type errmags: jax array of floats
-    :param z_obs: redshift of observed galaxy object
-    :type z_obs: float
-    :return: wavelengths, rescaled fluxes and errors and scaling factor of phtometric data
-    :rtype: 3 jax arrays of floats and a float
-    """
-    # transform magnitudes into fluxes
-    fluxes = vmap(lambda x : jnp.power(10.,-0.4*x), in_axes=0)(mags)
-    efluxes = vmap(lambda x,y : jnp.power(10.,-0.4*x)*y)(mags, errmags)
-
-    # transform from observation frame to restframe
-    wls_rest = wls/(1.+z_obs)
-    fluxes *= (1.+z_obs)
-    efluxes *= (1.+z_obs)
-
-    # calculate the SED model from the parameters
-    x,y_nodust,y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params,z_obs)
-
-    # calculate the scaling factor for photometric points
-    flux_pred = interp1d(wls_rest,x,y_dust)
-    scaling_factor =  jnp.mean(flux_pred/fluxes)
-
-    return wls_rest,  fluxes*scaling_factor,  efluxes*scaling_factor, scaling_factor
-
-def rescale_spectroscopy_ageDepMet_Q(params, wls, fluxes, efluxes, z_obs):
+def rescale_spectroscopy(params, wls, fluxes, efluxes, z_obs):
     """
     Calculate the rescaling factor of fors2 spectroscopy on restframe SSP spectrum plot.
     Comparison is done in restframe.
@@ -1057,16 +234,16 @@ def rescale_spectroscopy_ageDepMet_Q(params, wls, fluxes, efluxes, z_obs):
     #efluxes *= (1.+z_obs)
 
     # compute the model from params (params from photometry)
-    x, y_nodust, y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params, z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params, z_obs)
 
     # calculate the scaling factor
     flux_pred = interp1d(wls_rest, x, y_dust)
-    scaling_factor =  jnp.mean(flux_pred/fluxes)
+    scaling_factor = jnp.mean(flux_pred/fluxes)
 
     # return rescaled fluxes in rest-frame
     return wls_rest, fluxes*scaling_factor, efluxes*scaling_factor, scaling_factor
 
-def plot_fit_ssp_photometry_ageDepMet_Q(params, X, wls, mags, errmags, z_obs, subtit, ax=None):
+def plot_fit_ssp_photometry(params, X, wls, mags, errmags, z_obs, subtit, ax=None):
     """
     Plot SSP model fitted and photometric data points. Photometric data point are rescaled
     from observation frame to rest-frame.
@@ -1089,8 +266,8 @@ def plot_fit_ssp_photometry_ageDepMet_Q(params, X, wls, mags, errmags, z_obs, su
     :rtype: None
     """
     # Compute the SED from the fitted model
-    x, y_nodust, y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params, z_obs)
-    mean_mags = mean_mags_ageDepMet_Q(X, params, z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params, z_obs)
+    mean_mag = mean_mags(X, params, z_obs)
 
     if ax is None:
         _, ax = plt.subplots(1, 1)
@@ -1110,7 +287,7 @@ def plot_fit_ssp_photometry_ageDepMet_Q(params, X, wls, mags, errmags, z_obs, su
     label = "Photometry for " + subtit
     #ax.errorbar(xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
     ax_phot.errorbar(wls, mags, yerr=errmags, marker='o', color="black", ecolor="black", markersize=9, lw=2, label=label)
-    ax_phot.scatter(wls, mean_mags, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
+    ax_phot.scatter(wls, mean_mag, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
 
     title = "SED $L_\\nu$ with and without dust and rescaled photometry (obs. frame)"
     ax.set_title(title)
@@ -1137,8 +314,7 @@ def plot_fit_ssp_photometry_ageDepMet_Q(params, X, wls, mags, errmags, z_obs, su
     ax.grid()
     plt.show(block = False)
     
-    
-def plot_fit_ssp_ugri_ageDepMet_Q(params, X, wls, ugri, errugri, z_obs, subtit, ax=None):
+def plot_fit_ssp_ugri(params, X, wls, ugri, errugri, z_obs, subtit, ax=None):
     """
     Plot SSP model fitted and photometric data points. Photometric data point are rescaled
     from observation frame to rest-frame.
@@ -1164,8 +340,8 @@ def plot_fit_ssp_ugri_ageDepMet_Q(params, X, wls, ugri, errugri, z_obs, subtit, 
     list_name_f_sel = [ps.filters_namelist[index] for index in range(2,6)]
     
     # Compute the SED from the fitted model
-    x, y_nodust, y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params, z_obs)
-    mean_mags = mean_ugri_ageDepMet_Q(X, params, z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params, z_obs)
+    mean_mag = mean_ugri(X, params, z_obs)
 
     if ax is None:
         _, ax = plt.subplots(1, 1)
@@ -1185,7 +361,7 @@ def plot_fit_ssp_ugri_ageDepMet_Q(params, X, wls, ugri, errugri, z_obs, subtit, 
     label = "Photometry for " + subtit
     #ax.errorbar(xphot , yphot, yerr=eyphot, marker='o', color="black",ecolor="black",markersize=12,lw=2,label=label)
     ax_phot.errorbar(wls, ugri, yerr=errugri, marker='o', color="black", ecolor="black", markersize=9, lw=2, label=label)
-    ax_phot.scatter(wls, mean_mags, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
+    ax_phot.scatter(wls, mean_mag, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
 
     title = "SED $L_\\nu$ with and without dust and rescaled photometry (obs. frame)"
     ax.set_title(title)
@@ -1211,8 +387,7 @@ def plot_fit_ssp_ugri_ageDepMet_Q(params, X, wls, ugri, errugri, z_obs, subtit, 
     ax.grid()
     plt.show(block = False)
 
-
-def plot_fit_ssp_spectroscopy_ageDepMet_Q(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest, z_obs, subtit, ax=None):
+def plot_fit_ssp_spectroscopy(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest, z_obs, subtit, ax=None):
     """
     Plot SSP model fitted and Fors2 spectroscopic data points. Spectroscopic data points are rescaled
     from observation frame to rest-frame.
@@ -1237,7 +412,7 @@ def plot_fit_ssp_spectroscopy_ageDepMet_Q(params, Xspec_data_rest, Yspec_data_re
     """
 
     # calculate the SED
-    x, y_nodust, y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params,z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params,z_obs)
 
     if ax is None:
         _, ax = plt.subplots(1, 1)
@@ -1270,8 +445,7 @@ def plot_fit_ssp_spectroscopy_ageDepMet_Q(params, Xspec_data_rest, Yspec_data_re
     ax.grid()
     plt.show(block = False)
 
-
-def plot_fit_ssp_spectrophotometry_ageDepMet_Q(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest,\
+def plot_fit_ssp_spectrophotometry(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest,\
                                                X, Xphot_data_rest, Yphot_data_rest, EYphot_data_rest,\
                                                z_obs, subtit, ax=None):
     """
@@ -1303,7 +477,7 @@ def plot_fit_ssp_spectrophotometry_ageDepMet_Q(params, Xspec_data_rest, Yspec_da
 
     """
     # calculate the SED model from fitted parameters
-    x, y_nodust, y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params,z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params, z_obs)
 
 
     if ax is None:
@@ -1336,8 +510,8 @@ def plot_fit_ssp_spectrophotometry_ageDepMet_Q(params, Xspec_data_rest, Yspec_da
 
     #xphot , yphot, eyphot = Xphot_data_rest,Yphot_data_rest,EYphot_data_rest
     ax_phot.errorbar(xphot, yphot, yerr=eyphot, marker='o', color="black", ecolor="black", markersize=9, lw=2, label=label)
-    mean_mags = mean_mags_ageDepMet_Q(X, params, z_obs)
-    ax_phot.scatter(xphot, mean_mags, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
+    mean_mag = mean_mags(X, params, z_obs)
+    ax_phot.scatter(xphot, mean_mag, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
 
     title = "SED $L_\\nu$ with/wo dust spectroscopy and photometry combined (obs. frame)"
     ax.set_title(title)
@@ -1365,8 +539,7 @@ def plot_fit_ssp_spectrophotometry_ageDepMet_Q(params, Xspec_data_rest, Yspec_da
     ax.grid()
     plt.show(block = False)
 
-
-def plot_fit_ssp_spectrophotometry_sl_ageDepMet_Q(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest,\
+def plot_fit_ssp_spectrophotometry_sl(params, Xspec_data_rest, Yspec_data_rest, EYspec_data_rest,\
                                                   X, Xphot_data_rest, Yphot_data_rest, EYphot_data_rest,\
                                                   w_sl, fnu_sl, z_obs, subtit, ax=None):
     """
@@ -1402,7 +575,7 @@ def plot_fit_ssp_spectrophotometry_sl_ageDepMet_Q(params, Xspec_data_rest, Yspec
 
     """
     # compute the model from the parameters
-    x, y_nodust, y_dust = ssp_spectrum_fromparam_ageDepMet_Q(params,z_obs)
+    x, y_nodust, y_dust = ssp_spectrum_fromparam(params,z_obs)
 
     if ax is None:
         _, ax = plt.subplots(1, 1)
@@ -1432,12 +605,12 @@ def plot_fit_ssp_spectrophotometry_sl_ageDepMet_Q(params, Xspec_data_rest, Yspec
     #xphot, yphot, eyphot =  Xphot_data_rest, Yphot_data_rest*scaling_factor, EYphot_data_rest*scaling_factor
     xphot, yphot, eyphot =  Xphot_data_rest, Yphot_data_rest, EYphot_data_rest
     
-    mean_mags = mean_mags_ageDepMet_Q(X, params, z_obs)
+    mean_mag = mean_mags(X, params, z_obs)
     
     #...............................................................................
 
     ax_phot.errorbar(xphot, yphot, yerr=eyphot, marker='o', color="black", ecolor="black", markersize=9, lw=2, label=label)
-    ax_phot.scatter(xphot, mean_mags, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
+    ax_phot.scatter(xphot, mean_mag, marker='s', c="cyan", s=81, lw=2, label="Modeled photometry")
 
     title = "SED $L_\\nu$ with/wo dust spectroscopy and photometry combined (obs. frame)"
     ax.set_title(title)
@@ -1464,8 +637,7 @@ def plot_fit_ssp_spectrophotometry_sl_ageDepMet_Q(params, Xspec_data_rest, Yspec
     ax.grid()
     plt.show(block = False)
 
-
-def plot_SFH_ageDepMet_Q(params, z_obs, subtit, ax=None):
+def plot_SFH(params, z_obs, subtit, ax=None):
     """
     Plot Star Formation History
 
@@ -1480,7 +652,7 @@ def plot_SFH_ageDepMet_Q(params, z_obs, subtit, ax=None):
     :rtype: None
     """
 
-    t_obs, tarr, sfh_gal = mean_sfr_ageDepMet_Q(params,z_obs)
+    t_obs, tarr, sfh_gal = mean_sfr(params,z_obs)
 
     if ax is None:
         _, ax = plt.subplots(1, 1)
